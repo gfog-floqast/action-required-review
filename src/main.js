@@ -56,7 +56,7 @@ async function getRequirements() {
 async function main() {
 	try {
 		const requirements = await getRequirements();
-		core.startGroup( `Loaded ${ requirements.length } review requirement(s)` );
+		core.startGroup( `Fully-Loaded ${ requirements.length } review requirement(s)` );
 
 		const reviewers = await require( './reviewers.js' )();
 		core.startGroup( `Found ${ reviewers.length } reviewer(s)` );
