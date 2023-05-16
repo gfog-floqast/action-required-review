@@ -2,6 +2,7 @@ const fs = require( 'fs' );
 const core = require( '@actions/core' );
 const yaml = require( 'js-yaml' );
 const reporter = require( './reporter.js' );
+const requestReview = require( './request-review.js' );
 const Requirement = require( './requirement.js' );
 
 /**
@@ -42,7 +43,6 @@ async function getRequirements() {
 		if ( ! Array.isArray( requirements ) ) {
 			throw new Error( 'Requirements file does not contain an array' );
 		}
-
 		return requirements.map( ( r, i ) => new Requirement( { name: `#${ i }`, ...r } ) );
 	} catch ( error ) {
 		error[ Symbol.toStringTag ] = 'Error'; // Work around weird check in WError.
@@ -67,7 +67,6 @@ async function main() {
 		core.startGroup( `PR affects ${ paths.length } file(s)` );
 		paths.forEach( p => core.info( p ) );
 		core.endGroup();
-
 		let matchedPaths = [];
 		let ok = true;
 		for ( let i = 0; i < requirements.length; i++ ) {
@@ -83,8 +82,10 @@ async function main() {
 				core.info( `Requirement "${ r.name }" is satisfied by the existing reviews.` );
 			} else {
 				ok = false;
+				outstandingTeams = await r.fetchOutstandingTeams()
 				core.endGroup();
-				core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews.` );
+				core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews. Requesting reviews from ${[ ...outstandingTeams ].sort()}` );
+
 			}
 		}
 		if ( ok ) {
@@ -94,6 +95,9 @@ async function main() {
 				core.getBooleanInput( 'fail' ) ? reporter.STATE_FAILURE : reporter.STATE_PENDING,
 				reviewers.length ? 'Awaiting more reviews...' : 'Awaiting reviews...'
 			);
+			if ( core.getBooleanInput( 'request-reviews' ) ) {
+				await requestReview( [ ...outstandingTeams ].sort() );
+			}
 		}
 	} catch ( error ) {
 		let err, state, description;

@@ -7,6 +7,8 @@ const fetchTeamMembers = require( './team-members.js' );
 
 class RequirementError extends SError {}
 
+const outstandingTeams = new Set();
+
 /**
  * Prints a result set, then returns it.
  *
@@ -33,11 +35,11 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		return async function ( reviewers ) {
 			const members = await fetchTeamMembers( team );
 			const reviewSatisfied = reviewers.filter( reviewer => members.includes( reviewer ) );
-			const request = core.getInput('request-reviews')
-			if ( reviewSatisfied.length === 0 && request == 'true' ) {
-				await requestReview( team );
+			if ( reviewSatisfied.length === 0 ) {
+				outstandingTeams.add(team)
 			}
 			return printSet( `${ indent }Members of ${ team }:`, reviewSatisfied );
+			
 		};
 	}
 
@@ -123,6 +125,7 @@ class Requirement {
 	 * @param {boolean} config.consume - Whether matched paths should be ignored by later rules.
 	 */
 	constructor( config ) {
+		core.info(`i'm the constructor: ${config.teams}`)
 		this.name = config.name || 'Unnamed requirement';
 
 		if ( config.paths === 'unmatched' ) {
@@ -167,6 +170,7 @@ class Requirement {
 		}
 
 		this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
+		this.teamFilter = buildTeamFilter( config, { 'any-of': config.teams }, '  ' );
 		this.consume = !! config.consume;
 	}
 
@@ -221,6 +225,14 @@ class Requirement {
 	async isSatisfied( reviewers ) {
 		core.info( 'Checking reviewers...' );
 		return ( await this.reviewerFilter( reviewers ) ).length > 0;
+	}
+	/**
+	 * Returns the outstanding required teams
+	 *
+	 * @returns {Set} Set of required teams still outstanding
+	 */
+	async fetchOutstandingTeams() {
+		return [ ...outstandingTeams ].sort()
 	}
 }
 
