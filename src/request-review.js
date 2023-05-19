@@ -11,7 +11,7 @@ async function requestReviewer( teams ) {
 	const owner = github.context.payload.repository.owner.login;
 	const repo = github.context.payload.repository.name;
 	const pr = github.context.payload.pull_request.number;
-	core.info(`teams: ${typeof teams }`)
+
 	teamReviews = []
 	userReviews = []
 
@@ -22,12 +22,11 @@ async function requestReviewer( teams ) {
 		} else {
 			teamReviews.push( t )
 		}
-		core.info(`teamReviews: ${teamReviews}`)
-		core.info(`userReviews: ${userReviews}`)
 	}
 
+        core.info(`teamReviews: ${teamReviews}`);
+        core.info(`userReviews: ${userReviews}`);
 	try {
-		core.info( `Requesting review from ${teamReviews}, ${userReviews}` );
 		await octokit.rest.pulls.requestReviewers( {
 			owner: owner,
 			repo: repo,
@@ -35,6 +34,7 @@ async function requestReviewer( teams ) {
 			reviewers: userReviews,
 			team_reviewers: teamReviews
 		} )
+		core.info( `Requested review(s) from ${ teams }` );
 	} catch ( err ) {
 		throw new Error( `Unable to request review.\n  Error: ${err}` );
 	}

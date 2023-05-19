@@ -9,6 +9,8 @@ class RequirementError extends SError {}
 
 const outstandingTeams = new Set();
 
+let tempAnyOf = [];
+
 /**
  * Prints a result set, then returns it.
  *
@@ -25,21 +27,26 @@ function printSet( label, items ) {
  * Build a reviewer team membership filter.
  *
  * @param {object} config - Requirements configuration object being processed.
+ * @param {string} op - whether in an all or any of block
  * @param {Array|string|object} teamConfig - Team name, or single-key object with a list of teams/objects, or array of such.
  * @param {string} indent - String for indentation.
  * @returns {Function} Function to filter an array of reviewers by membership in the team(s).
  */
-function buildReviewerFilter( config, teamConfig, indent ) {
+function buildReviewerFilter( config, op, teamConfig, indent ) {
+        //core.info(`starting the buildReviewerFilter`)
 	if ( typeof teamConfig === 'string' ) {
 		const team = teamConfig;
 		return async function ( reviewers ) {
 			const members = await fetchTeamMembers( team );
 			const reviewSatisfied = reviewers.filter( reviewer => members.includes( reviewer ) );
 			if ( reviewSatisfied.length === 0 ) {
-				outstandingTeams.add(team)
-			}
+                                if ( op == 'all-of' ) {
+                                        outstandingTeams.add(team)
+                                } else {
+				        tempAnyOf.push( team );
+                                };
+			};
 			return printSet( `${ indent }Members of ${ team }:`, reviewSatisfied );
-			
 		};
 	}
 
@@ -54,7 +61,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		} );
 	}
 
-	const op = keys[ 0 ];
+        op = keys[ 0 ];
 	let arg = teamConfig[ op ];
 
 	switch ( op ) {
@@ -73,7 +80,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 					value: teamConfig,
 				} );
 			}
-			arg = arg.map( t => buildReviewerFilter( config, t, `${ indent }  ` ) );
+			arg = arg.map( t => buildReviewerFilter( config, op, t, `${ indent }  ` ) );
 			break;
 
 		default:
@@ -86,11 +93,13 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 	if ( op === 'any-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these:` );
-			return printSet( `${ indent }=>`, [
-				...new Set(
-					( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
-				),
-			] );
+                        promiseReviews = new Set(( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 ));
+                        if ( [ ...promiseReviews ] == '' ) {
+                                for (var i = 0; i < tempAnyOf.length; i++) {
+                                  outstandingTeams.add(tempAnyOf[ i ]);
+                                }
+                        } else { tempAnyOf = [] };
+			return printSet( `${ indent }=>`, [ ...promiseReviews, ] );
 		};
 	}
 
@@ -125,7 +134,6 @@ class Requirement {
 	 * @param {boolean} config.consume - Whether matched paths should be ignored by later rules.
 	 */
 	constructor( config ) {
-		core.info(`i'm the constructor: ${config.teams}`)
 		this.name = config.name || 'Unnamed requirement';
 
 		if ( config.paths === 'unmatched' ) {
@@ -169,8 +177,7 @@ class Requirement {
 			);
 		}
 
-		this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
-		this.teamFilter = buildTeamFilter( config, { 'any-of': config.teams }, '  ' );
+		this.reviewerFilter = buildReviewerFilter( config, 'any-of', { 'any-of': config.teams }, '  ' );
 		this.consume = !! config.consume;
 	}
 

@@ -43,6 +43,7 @@ async function getRequirements() {
 		if ( ! Array.isArray( requirements ) ) {
 			throw new Error( 'Requirements file does not contain an array' );
 		}
+
 		return requirements.map( ( r, i ) => new Requirement( { name: `#${ i }`, ...r } ) );
 	} catch ( error ) {
 		error[ Symbol.toStringTag ] = 'Error'; // Work around weird check in WError.
@@ -82,10 +83,9 @@ async function main() {
 				core.info( `Requirement "${ r.name }" is satisfied by the existing reviews.` );
 			} else {
 				ok = false;
-				outstandingTeams = await r.fetchOutstandingTeams()
+				outstandingTeams = await r.fetchOutstandingTeams();
 				core.endGroup();
 				core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews. Requesting reviews from ${[ ...outstandingTeams ].sort()}` );
-
 			}
 		}
 		if ( ok ) {
@@ -96,7 +96,8 @@ async function main() {
 				reviewers.length ? 'Awaiting more reviews...' : 'Awaiting reviews...'
 			);
 			if ( core.getBooleanInput( 'request-reviews' ) ) {
-				await requestReview( [ ...outstandingTeams ].sort() );
+                                core.info(`outstandingTeams: ${outstandingTeams}`)
+				await requestReview( [...outstandingTeams] );
 			}
 		}
 	} catch ( error ) {

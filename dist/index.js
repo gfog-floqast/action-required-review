@@ -16457,7 +16457,7 @@ async function requestReviewer( teams ) {
 	const owner = github.context.payload.repository.owner.login;
 	const repo = github.context.payload.repository.name;
 	const pr = github.context.payload.pull_request.number;
-	core.info(`teams: ${typeof teams }`)
+
 	teamReviews = []
 	userReviews = []
 
@@ -16468,12 +16468,11 @@ async function requestReviewer( teams ) {
 		} else {
 			teamReviews.push( t )
 		}
-		core.info(`teamReviews: ${teamReviews}`)
-		core.info(`userReviews: ${userReviews}`)
 	}
 
+        core.info(`teamReviews: ${teamReviews}`);
+        core.info(`userReviews: ${userReviews}`);
 	try {
-		core.info( `Requesting review from ${teamReviews}, ${userReviews}` );
 		await octokit.rest.pulls.requestReviewers( {
 			owner: owner,
 			repo: repo,
@@ -16481,6 +16480,7 @@ async function requestReviewer( teams ) {
 			reviewers: userReviews,
 			team_reviewers: teamReviews
 		} )
+		core.info( `Requested review(s) from ${ teams }` );
 	} catch ( err ) {
 		throw new Error( `Unable to request review.\n  Error: ${err}` );
 	}
@@ -16505,6 +16505,7 @@ class RequirementError extends SError {}
 
 const outstandingTeams = new Set();
 
+let tempSet = [];
 /**
  * Prints a result set, then returns it.
  *
@@ -16525,17 +16526,21 @@ function printSet( label, items ) {
  * @param {string} indent - String for indentation.
  * @returns {Function} Function to filter an array of reviewers by membership in the team(s).
  */
-function buildReviewerFilter( config, teamConfig, indent ) {
+function buildReviewerFilter( config, op, teamConfig, indent ) {
+        //core.info(`starting the buildReviewerFilter`)
 	if ( typeof teamConfig === 'string' ) {
 		const team = teamConfig;
 		return async function ( reviewers ) {
 			const members = await fetchTeamMembers( team );
 			const reviewSatisfied = reviewers.filter( reviewer => members.includes( reviewer ) );
 			if ( reviewSatisfied.length === 0 ) {
-				outstandingTeams.add(team)
-			}
+                                if ( op == 'all-of' ) {
+                                        outstandingTeams.add(team)
+                                } else {
+				        tempSet.push( team );
+                                };
+			};
 			return printSet( `${ indent }Members of ${ team }:`, reviewSatisfied );
-			
 		};
 	}
 
@@ -16550,7 +16555,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		} );
 	}
 
-	const op = keys[ 0 ];
+        op = keys[ 0 ];
 	let arg = teamConfig[ op ];
 
 	switch ( op ) {
@@ -16569,7 +16574,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 					value: teamConfig,
 				} );
 			}
-			arg = arg.map( t => buildReviewerFilter( config, t, `${ indent }  ` ) );
+			arg = arg.map( t => buildReviewerFilter( config, op, t, `${ indent }  ` ) );
 			break;
 
 		default:
@@ -16582,11 +16587,13 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 	if ( op === 'any-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these:` );
-			return printSet( `${ indent }=>`, [
-				...new Set(
-					( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
-				),
-			] );
+                        promiseReviews = new Set(( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 ));
+                        if ( [ ...promiseReviews ] == '' ) {
+                                for (var i = 0; i < tempSet.length; i++) {
+                                  outstandingTeams.add(tempSet[ i ]);
+                                }
+                        } else { tempSet = [] };
+			return printSet( `${ indent }=>`, [ ...promiseReviews, ] );
 		};
 	}
 
@@ -16606,98 +16613,6 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		config: config,
 		value: teamConfig,
 	} );
-}
-
-/**
- * Build a reviewer team membership filter.
- *
- * @param {object} config - Requirements configuration object being processed.
- * @param {Array|string|object} teamConfig - Team name, or single-key object with a list of teams/objects, or array of such.
- * @param {string} indent - String for indentation.
- */
-function buildTeamFilter( config, teamConfig, indent ) {
-	if ( typeof teamConfig === 'string' ) {
-		const team = teamConfig;
-		return async function ( reviewers ) {
-			const members = await fetchTeamMembers( team );
-			const reviewSatisfied = reviewers.filter( reviewer => members.includes( reviewer ) );
-			if ( reviewSatisfied.length === 0 ) {
-				outstandingTeams.add(team)
-			}
-			return [ ...outstandingTeams ].sort()
-		};
-	}
-
-	let keys;
-	try {
-		keys = Object.keys( teamConfig );
-		assert( keys.length === 1 );
-	} catch {
-		throw new RequirementError( 'Expected a team name or a single-keyed object.', {
-			config: config,
-			value: teamConfig,
-		} );
-	}
-
-	const op = keys[ 0 ];
-	let arg = teamConfig[ op ];
-
-	switch ( op ) {
-		case 'any-of':
-		case 'all-of':
-			// These ops require an array of teams/objects.
-/*			if ( ! Array.isArray( arg ) ) {
-				throw new RequirementError( `Expected an array of teams, got ${ typeof arg }`, {
-					config: config,
-					value: arg,
-				} );
-			}
-			if ( ! arg.length === 0 ) {
-				throw new RequirementError( 'Expected a non-empty array of teams', {
-					config: config,
-					value: teamConfig,
-				} );
-			}*/
-			arg = arg.map( t => buildTeamFilter( config, t, `${ indent }  ` ) );
-			break;
-/*
-		default:
-			throw new RequirementError( `Unrecognized operation "${ op }"`, {
-				config: config,
-				value: teamConfig,
-			} );
-*/
-	}
-
-	if ( op === 'any-of' ) {
-		return async function ( reviewers ) {
-			core.info( `${ indent }Union of these:` );
-			return printSet( `${ indent }=>`, [
-				...new Set(
-					( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
-				),
-			] );
-		};
-	}
-
-	if ( op === 'all-of' ) {
-		return async function ( reviewers ) {
-			core.info( `${ indent }Union of these, if none are empty:` );
-			const filtered = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
-			core.info(`filtered: ${filtered}`)
-			if ( filtered.some( a => a.length === 0 ) ) {
-				return printSet( `${ indent }=>`, [] );
-			}
-			return printSet( `${ indent }=>`, [ ...new Set( filtered.flat( 1 ) ) ] );
-		};
-	}
-/*
-	// WTF?
-	throw new RequirementError( `Unrecognized operation "${ op }"`, {
-		config: config,
-		value: teamConfig,
-	} );
-*/
 }
 
 /**
@@ -16713,7 +16628,6 @@ class Requirement {
 	 * @param {boolean} config.consume - Whether matched paths should be ignored by later rules.
 	 */
 	constructor( config ) {
-		core.info(`i'm the constructor: ${config.teams}`)
 		this.name = config.name || 'Unnamed requirement';
 
 		if ( config.paths === 'unmatched' ) {
@@ -16757,8 +16671,7 @@ class Requirement {
 			);
 		}
 
-		this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
-		this.teamFilter = buildTeamFilter( config, { 'any-of': config.teams }, '  ' );
+		this.reviewerFilter = buildReviewerFilter( config, 'any-of', { 'any-of': config.teams }, '  ' );
 		this.consume = !! config.consume;
 	}
 
@@ -16815,10 +16728,9 @@ class Requirement {
 		return ( await this.reviewerFilter( reviewers ) ).length > 0;
 	}
 	/**
-	 * Test whether this requirement is satisfied.
+	 * Returns the outstanding required teams
 	 *
-	 * @param {string[]} reviewers - Reviewers to test against.
-	 * @returns {Array} Whether the requirement is satisfied.
+	 * @returns {Set} Set of required teams still outstanding
 	 */
 	async fetchOutstandingTeams() {
 		return [ ...outstandingTeams ].sort()
@@ -17171,9 +17083,7 @@ async function getRequirements() {
 		if ( ! Array.isArray( requirements ) ) {
 			throw new Error( 'Requirements file does not contain an array' );
 		}
-		/*requirements.forEach(function(entry) {
-			core.info(`I'm an entry: ${ JSON.stringify(entry, null, 4) }`);
-		});*/
+
 		return requirements.map( ( r, i ) => new Requirement( { name: `#${ i }`, ...r } ) );
 	} catch ( error ) {
 		error[ Symbol.toStringTag ] = 'Error'; // Work around weird check in WError.
@@ -17191,19 +17101,13 @@ async function main() {
 
 		const reviewers = await __nccwpck_require__( 6559 )();
 		core.startGroup( `Found ${ reviewers.length } reviewer(s)` );
-		reviewers.forEach( r => core.info( `hi, its me: ${r}` ) );
+		reviewers.forEach( r => core.info( r ) );
 		core.endGroup();
 
 		let paths = await __nccwpck_require__( 2603 )();
 		core.startGroup( `PR affects ${ paths.length } file(s)` );
 		paths.forEach( p => core.info( p ) );
 		core.endGroup();
-/*
-		let teams = await require( './teams.js')();
-		core.startGroup( `PR affects ${ teams.length } team(s)` );
-		paths.forEach( t => core.info( t ) );
-		core.endGroup();
-*/
 		let matchedPaths = [];
 		let ok = true;
 		for ( let i = 0; i < requirements.length; i++ ) {
@@ -17218,12 +17122,10 @@ async function main() {
 				core.endGroup();
 				core.info( `Requirement "${ r.name }" is satisfied by the existing reviews.` );
 			} else {
-				//Have to loop back now to get teams and remove those that have reviewers as members
 				ok = false;
-				outstandingTeams = await r.fetchOutstandingTeams()
+				outstandingTeams = await r.fetchOutstandingTeams();
 				core.endGroup();
 				core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews. Requesting reviews from ${[ ...outstandingTeams ].sort()}` );
-
 			}
 		}
 		if ( ok ) {
@@ -17234,7 +17136,8 @@ async function main() {
 				reviewers.length ? 'Awaiting more reviews...' : 'Awaiting reviews...'
 			);
 			if ( core.getBooleanInput( 'request-reviews' ) ) {
-				await requestReview( [ ...outstandingTeams ].sort() );
+                                core.info(`outstandingTeams: ${outstandingTeams}`)
+				await requestReview( [...outstandingTeams] );
 			}
 		}
 	} catch ( error ) {
