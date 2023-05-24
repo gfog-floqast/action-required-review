@@ -31,10 +31,15 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		const team = teamConfig;
 		return async function ( reviewers ) {
 			const members = await fetchTeamMembers( team );
-			return printSet(
+			reviewersFilter = reviewers.filter( reviewer => members.includes( reviewer ) );
+			reviewersJoined = reviewersFilter.length ? reviewersFilter.join( ', ' ) : '<empty set>'
+			const neededTeams = reviewersFilter.length ? '' : team
+			core.info( `reviewersFilter: ${reviewersFilter}, neededTeams: ${neededTeams}` );
+			items = printSet(
 				`${ indent }Members of ${ team }:`,
-				reviewers.filter( reviewer => members.includes( reviewer ) )
+				neededTeams
 			);
+			return neededTeams;
 		};
 	}
 
@@ -81,11 +86,11 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 	if ( op === 'any-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these:` );
-			return printSet( `${ indent }=>`, [
-				...new Set(
-					( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
-				),
-			] );
+			const promiseAll = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
+			core.info( `promiseAllFlat: ${( promiseAll ).flat ( 1 )}` );
+			const promiseAllSet = [ ...new Set( ( promiseAll ).flat( 1 ) )];
+			core.info( `promiseAllSet: ${promiseAllSet}<==` );
+			return printSet( `${ indent }=>`, promiseAllSet );
 		};
 	}
 
@@ -93,6 +98,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these, if none are empty:` );
 			const filtered = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
+			core.info( `filtered: ${filtered}` );
 			if ( filtered.some( a => a.length === 0 ) ) {
 				return printSet( `${ indent }=>`, [] );
 			}
@@ -164,6 +170,7 @@ class Requirement {
 		}
 
 		this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
+		core.info(`reviewerFilter: ${this.reviewerFilter}`);
 		this.consume = !! config.consume;
 	}
 
@@ -217,7 +224,9 @@ class Requirement {
 	 */
 	async isSatisfied( reviewers ) {
 		core.info( 'Checking reviewers...' );
-		return ( await this.reviewerFilter( reviewers ) ).length > 0;
+		const satisfaction = await this.reviewerFilter( reviewers )
+		core.info( `satisfaction: ${(satisfaction).length}` );
+		return ( satisfaction ).length > 0;
 	}
 }
 
