@@ -31,10 +31,14 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		const team = teamConfig;
 		return async function ( reviewers ) {
 			const members = await fetchTeamMembers( team );
-			return printSet(
+			reviewersFilter = reviewers.filter( reviewer => members.includes( reviewer ) );
+			reviewersJoined = reviewersFilter.length ? reviewersFilter.join( ', ' ) : '<empty set>'
+			const neededTeams = reviewersFilter.length ? [] : team
+			printSet(
 				`${ indent }Members of ${ team }:`,
-				reviewers.filter( reviewer => members.includes( reviewer ) )
+				reviewersFilter	
 			);
+			return {reviewersFilter, neededTeams};
 		};
 	}
 
@@ -81,11 +85,12 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 	if ( op === 'any-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these:` );
-			return printSet( `${ indent }=>`, [
-				...new Set(
-					( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
-				),
-			] );
+			const promiseAll = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
+
+			core.info( `${ indent }reviewersFilter: ${JSON.stringify(promiseAll)}` );
+			core.info( `${ indent }neededTeam: ${JSON.stringify(promiseAll)}` );
+			const promiseAllSet = [ ...new Set( ( promiseAll ).flat( 1 ) )];
+			return printSet( `${ indent }=>`, promiseAllSet );
 		};
 	}
 
@@ -93,6 +98,8 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these, if none are empty:` );
 			const filtered = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
+			core.info( `${ indent }reviewersFilter: ${ JSON.stringify( filtered )}` );
+			core.info( `${ indent }neededTeam: ${ JSON.stringify( filtered )}` );
 			if ( filtered.some( a => a.length === 0 ) ) {
 				return printSet( `${ indent }=>`, [] );
 			}
@@ -217,7 +224,9 @@ class Requirement {
 	 */
 	async isSatisfied( reviewers ) {
 		core.info( 'Checking reviewers...' );
-		return ( await this.reviewerFilter( reviewers ) ).length > 0;
+		const satisfaction = await this.reviewerFilter( reviewers )
+		core.info( `satisfaction: ${(satisfaction).length}` );
+		return ( satisfaction ).length > 0;
 	}
 }
 
