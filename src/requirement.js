@@ -11,11 +11,11 @@ class RequirementError extends SError {}
  *
  * @param {string} label - Label for the set.
  * @param {string[]} items - Items to print. If an empty array, will print `<empty set>` instead.
- * @returns {string[]} `items`.
+ * @returns {{reviewersFilter, neededTeams}} `items`.
  */
-function printSet( label, items ) {
-	core.info( label + ' ' + ( items.length ? items.join( ', ' ) : '<empty set>' ) );
-	return items;
+function printSet( label, reviewersFilter, neededTeams ) {
+	core.info( label + ' ' + ( reviewersFilter.length ? reviewersFilter.join( ', ' ) : '<empty set>' ) );
+	return {reviewersFilter, neededTeams};
 }
 
 /**
@@ -34,15 +34,11 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 			reviewersFilter = reviewers.filter( reviewer => members.includes( reviewer ) );
 			reviewersJoined = reviewersFilter.length ? reviewersFilter.join( ', ' ) : '<empty set>'
 			const neededTeams = reviewersFilter.length ? [] : team
-			printSet(
+			return printSet(
 				`${ indent }Members of ${ team }:`,
-				reviewersFilter	
-			);
-			printSet(
-				`${ indent }Teams needing review:`,
+				reviewersFilter,
 				neededTeams
 			);
-			return {reviewersFilter, neededTeams};
 		};
 	}
 
@@ -93,8 +89,18 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 
 			core.info( `${ indent }reviewersFilter: ${JSON.stringify(promiseAll)}` );
 			core.info( `${ indent }neededTeam: ${JSON.stringify(promiseAll)}` );
-			const promiseAllSet = [ ...new Set( ( promiseAll ).flat( 1 ) )];
-			return printSet( `${ indent }=>`, promiseAllSet );
+			const requirementsMet = []; // [['trevr'], []]
+			const neededTeams = []; // [[], ['security']]
+			promiseAll.forEach((requirementResult) => { // [{reviewersFilter: ['trevr'], "neededTeams": []}, {reviewersFilter: [], "neededTeams": ['security']}]
+				requirementsMet.push(requirementResult.reviewersFilter);
+				neededTeams.push(requirementResult.neededTeams);
+			});
+			const promiseAllSet = [ ...new Set( ( requirementsMet ).flat( 1 ) )]; // ['trevr']
+			if(requirementsMet.length > 0){
+				neededTeams.length = 0;
+			}
+			return printSet( `${ indent }=>`, promiseAllSet,  neededTeams);
+
 		};
 	}
 
@@ -104,10 +110,17 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 			const filtered = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
 			core.info( `${ indent }reviewersFilter: ${ JSON.stringify( filtered )}` );
 			core.info( `${ indent }neededTeam: ${ JSON.stringify( filtered )}` );
-			if ( filtered.some( a => a.length === 0 ) ) {
-				return printSet( `${ indent }=>`, [] );
+			const requirementsMet = []; // [['trevr'], []]
+			const neededTeams = []; // [[], ['security']]
+			filtered.forEach((requirementResult) => { // [{reviewersFilter: ['trevr'], "neededTeams": []}, {reviewersFilter: [], "neededTeams": ['security']}]
+				requirementsMet.push(requirementResult.reviewersFilter);
+				neededTeams.push(requirementResult.neededTeams);
+			});
+
+			if ( requirementsMet.some( a => a.length === 0 ) ) {
+				return printSet( `${ indent }=>`, [], neededTeams );
 			}
-			return printSet( `${ indent }=>`, [ ...new Set( filtered.flat( 1 ) ) ] );
+			return printSet( `${ indent }=>`, [ ...new Set( requirementsMet.flat( 1 ) ) ], neededTeams );
 		};
 	}
 
