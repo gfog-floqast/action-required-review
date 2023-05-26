@@ -2,6 +2,7 @@ const fs = require( 'fs' );
 const core = require( '@actions/core' );
 const yaml = require( 'js-yaml' );
 const reporter = require( './reporter.js' );
+const requestReview = require( './request-review.js' );
 const Requirement = require( './requirement.js' );
 
 /**
@@ -10,9 +11,9 @@ const Requirement = require( './requirement.js' );
  * @returns {Requirement[]} Requirements.
  */
 async function getRequirements() {
-	let reqirementsString = core.getInput( 'requirements' );
+	let requirementsString = core.getInput( 'requirements' );
 
-	if ( ! reqirementsString ) {
+	if ( ! requirementsString ) {
 		const filename = core.getInput( 'requirements-file' );
 		if ( ! filename ) {
 			throw new reporter.ReportError(
@@ -23,7 +24,7 @@ async function getRequirements() {
 		}
 
 		try {
-			reqirementsString = fs.readFileSync( filename, 'utf8' );
+			requirementsString = fs.readFileSync( filename, 'utf8' );
 		} catch ( error ) {
 			throw new reporter.ReportError(
 				`Requirements file ${ filename } could not be read`,
@@ -36,7 +37,7 @@ async function getRequirements() {
 	}
 
 	try {
-		const requirements = yaml.load( reqirementsString, {
+		const requirements = yaml.load( requirementsString, {
 			onWarning: w => core.warning( `Yaml: ${ w.message }` ),
 		} );
 		if ( ! Array.isArray( requirements ) ) {
@@ -67,7 +68,6 @@ async function main() {
 		core.startGroup( `PR affects ${ paths.length } file(s)` );
 		paths.forEach( p => core.info( p ) );
 		core.endGroup();
-
 		let matchedPaths = [];
 		let ok = true;
 		for ( let i = 0; i < requirements.length; i++ ) {
@@ -83,8 +83,9 @@ async function main() {
 				core.info( `Requirement "${ r.name }" is satisfied by the existing reviews.` );
 			} else {
 				ok = false;
+				outstandingTeams = await r.fetchOutstandingTeams();
 				core.endGroup();
-				core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews.` );
+				core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews. Requesting reviews from ${[ ...outstandingTeams ].sort()}` );
 			}
 		}
 		if ( ok ) {
@@ -94,6 +95,10 @@ async function main() {
 				core.getBooleanInput( 'fail' ) ? reporter.STATE_FAILURE : reporter.STATE_PENDING,
 				reviewers.length ? 'Awaiting more reviews...' : 'Awaiting reviews...'
 			);
+			if ( core.getBooleanInput( 'request-reviews' ) ) {
+                                core.info(`outstandingTeams: ${outstandingTeams}`)
+				await requestReview( [...outstandingTeams] );
+			}
 		}
 	} catch ( error ) {
 		let err, state, description;
