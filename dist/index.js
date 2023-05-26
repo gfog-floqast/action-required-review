@@ -16479,13 +16479,16 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 			const members = await fetchTeamMembers( team );
 			reviewersFilter = reviewers.filter( reviewer => members.includes( reviewer ) );
 			reviewersJoined = reviewersFilter.length ? reviewersFilter.join( ', ' ) : '<empty set>'
-			const neededTeams = reviewersFilter.length ? '' : team
-			core.info( `reviewersFilter: ${reviewersFilter}, neededTeams: ${neededTeams}` );
-			items = printSet(
+			const neededTeams = reviewersFilter.length ? [] : team
+			printSet(
 				`${ indent }Members of ${ team }:`,
+				reviewersFilter	
+			);
+			printSet(
+				`${ indent }Teams needing review:`,
 				neededTeams
 			);
-			return neededTeams;
+			return {reviewersFilter, neededTeams};
 		};
 	}
 
@@ -16533,9 +16536,10 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these:` );
 			const promiseAll = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
-			core.info( `promiseAllFlat: ${( promiseAll ).flat ( 1 )}` );
+
+			core.info( `${ indent }reviewersFilter: ${JSON.stringify(promiseAll)}` );
+			core.info( `${ indent }neededTeam: ${JSON.stringify(promiseAll)}` );
 			const promiseAllSet = [ ...new Set( ( promiseAll ).flat( 1 ) )];
-			core.info( `promiseAllSet: ${promiseAllSet}<==` );
 			return printSet( `${ indent }=>`, promiseAllSet );
 		};
 	}
@@ -16544,7 +16548,8 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these, if none are empty:` );
 			const filtered = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
-			core.info( `filtered: ${filtered}` );
+			core.info( `${ indent }reviewersFilter: ${ JSON.stringify( filtered )}` );
+			core.info( `${ indent }neededTeam: ${ JSON.stringify( filtered )}` );
 			if ( filtered.some( a => a.length === 0 ) ) {
 				return printSet( `${ indent }=>`, [] );
 			}
@@ -16616,7 +16621,6 @@ class Requirement {
 		}
 
 		this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
-		core.info(`reviewerFilter: ${this.reviewerFilter}`);
 		this.consume = !! config.consume;
 	}
 
