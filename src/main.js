@@ -2,6 +2,7 @@ const fs = require( 'fs' );
 const core = require( '@actions/core' );
 const yaml = require( 'js-yaml' );
 const reporter = require( './reporter.js' );
+const requestReview = require( './request-review.js' );
 const Requirement = require( './requirement.js' );
 
 /**
@@ -70,6 +71,7 @@ async function main() {
 
 		let matchedPaths = [];
 		let ok = true;
+		const teamsNeededForReview = new Set()
 		for ( let i = 0; i < requirements.length; i++ ) {
 			const r = requirements[ i ];
 			core.startGroup( `Checking requirement "${ r.name }"...` );
@@ -78,22 +80,27 @@ async function main() {
 			if ( ! applies ) {
 				core.endGroup();
 				core.info( `Requirement "${ r.name }" does not apply to any files in this PR.` );
-			} else if ( await r.isSatisfied( reviewers ) ) {
-				core.endGroup();
-				core.info( `Requirement "${ r.name }" is satisfied by the existing reviews.` );
 			} else {
-				ok = false;
+				const neededForRequirement = await r.needsReviewsFrom( reviewers );
 				core.endGroup();
-				core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews.` );
+				if ( neededForRequirement.length === 0 ) {
+					core.info( `Requirement "${ r.name }" is satisfied by the existing reviews.` );
+				} else {
+					core.error( `Requirement "${ r.name }" is not satisfied by the existing reviews.` );
+					neededForRequirement.forEach( teamsNeededForReview.add, teamsNeededForReview );
+				}
 			}
 		}
-		if ( ok ) {
+		if ( teamsNeededForReview.size === 0 ) {
 			await reporter.status( reporter.STATE_SUCCESS, 'All required reviews have been provided!' );
 		} else {
 			await reporter.status(
 				core.getBooleanInput( 'fail' ) ? reporter.STATE_FAILURE : reporter.STATE_PENDING,
 				reviewers.length ? 'Awaiting more reviews...' : 'Awaiting reviews...'
 			);
+			if ( core.getBooleanInput( 'request-reviews' ) ) {
+				await requestReview( [ ...teamsNeededForReview ] );
+			}
 		}
 	} catch ( error ) {
 		let err, state, description;
